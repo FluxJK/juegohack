@@ -8,7 +8,7 @@ const basicEquipment=['pistola','radio','camara'];
 const S={mode:'title',map:'bridge',node:'PROLOGO',done:false,pending:null,player:{x:380,y:650,dir:'down',radius:9},npcs:[],objects:[],path:[],autoTarget:null,health:100,ammo:12,notes:{},inventory:[...basicEquipment],flags:{ruta_bien:null,elena_aliada:null,remordimiento:null},lights:{},line:0,lines:[],storyTalk:false,completed:[],activities:Activities.initial(),battle:null,guard:null,alert:0,time:0,debug:false,steps:0,paused:false,conversationOpen:false};
 let width=900,height=650,zoom=1,cam={x:512,y:650},prev=0,toastUntil=0,lastFire=-10,lastTalk=-10,bullets=[],effects=[],typeElapsed=0,typeIndex=0,fullText='',selected=null,introT=0,escapeTime=90,guardPathClock=0,moveActive=false;
 function loadImage(key,url){return new Promise(resolve=>{const im=new Image();im.onload=()=>{assets[key]=im;resolve(true)};im.onerror=()=>{console.warn('Recurso no disponible:',url);resolve(false)};im.src=url})}
-const loading=Promise.all([...Object.entries(MAPS).filter(([,m])=>m.file).map(([id,m])=>loadImage(id,'assets/scenes/'+m.file+'?v=5.1.0')),...Array.from({length:17},(_,i)=>loadImage('frame'+i,`assets/frames/sprite_${String(i).padStart(2,'0')}.png?v=5.1.0`)),loadImage('npcs','assets/art/chibi-atlas.png?v=5.1.0')]);
+const loading=Promise.all([...Object.entries(MAPS).filter(([,m])=>m.file).map(([id,m])=>loadImage(id,'assets/scenes/'+m.file+'?v=5.1.1')),...Array.from({length:17},(_,i)=>loadImage('frame'+i,`assets/frames/sprite_${String(i).padStart(2,'0')}.png?v=5.1.1`)),loadImage('npcs','assets/art/chibi-atlas.png?v=5.1.1')]);
 function resize(){const rect=canvas.getBoundingClientRect();width=Math.max(1,rect.width);height=Math.max(1,rect.height);const d=Math.min(window.devicePixelRatio||1,2);canvas.width=width*d;canvas.height=height*d;ctx.setTransform(d,0,0,d,0,0);zoom=Math.max(.65,Math.min(1.25,height/570))}
 window.addEventListener('resize',resize);resize();
 function mode(m){document.body.classList.remove('speaking');S.mode=m;document.body.dataset.mode=m;$('visual-novel').hidden=m!=='vn';$('first-person').hidden=m!=='inspect';$('title').hidden=m!=='title';$('combat-controls').hidden=m!=='combat';$('danger-wrap').hidden=!['stealth','escape'].includes(m);$('interaction').hidden=true;keys.clear();S.path=[];S.autoTarget=null;A.ambience?.(S.map);A.mood(m);syncAudio();updateHUD()}
@@ -53,13 +53,22 @@ function environmentNote(item) {
 }
 function updateHUD() {
  const node=STORY[S.node];
- $('activity-menu').hidden=!(S.mode==='explore'&&S.done&&sceneMap(node.scene)===S.map&&(Activities.nodes[S.node]||[]).length);
- $('chapter').textContent=node.chapter;$('location').textContent=MAPS[S.map].name;$('clock').textContent=node.time;
- $('health').textContent='● '+Math.ceil(S.health);$('ammo').textContent=S.ammo+' / 12';
- $('count').textContent=Object.keys(S.notes).length;
- $('objective').textContent=objective();
- $('mode-help').textContent=environmentNote();
- $('danger').value=S.alert;$('danger-label').textContent=S.mode==='escape'?'PERSECUCIÓN':'DETECCIÓN';
+ const activityMenu=$('activity-menu');
+ if(activityMenu)activityMenu.hidden=!(S.mode==='explore'&&S.done&&sceneMap(node.scene)===S.map&&(Activities.nodes[S.node]||[]).length);
+ const values=[
+  ['chapter',node?.chapter],
+  ['location',MAPS[S.map]?.name],
+  ['clock',node?.time],
+  ['health','● '+Math.ceil(S.health)],
+  ['ammo',S.ammo+' / 12'],
+  ['count',Object.keys(S.notes).length],
+  ['objective',objective()],
+  ['mode-help',environmentNote()],
+  ['danger-label',S.mode==='escape'?'PERSECUCIÓN':'DETECCIÓN']
+ ];
+ for(const [id,value] of values){const element=$(id);if(element)element.textContent=value??''}
+ const danger=$('danger');
+ if(danger)danger.value=S.alert;
 }
 function save(){try{localStorage.setItem(saveKey,JSON.stringify({version:2,node:S.node,map:S.map,player:S.player,flags:S.flags,done:['combat','stealth','escape'].includes(S.mode)?false:S.done,pending:['combat','stealth','escape'].includes(S.mode)?null:S.pending,health:S.health,ammo:S.ammo,notes:S.notes,inventory:S.inventory,completed:S.completed,activities:S.activities,lights:S.lights}));$('continue-game').disabled=false}catch{}}
 function restore(){try{const d=JSON.parse(localStorage.getItem(saveKey));if(d?.version!==2||!STORY[d.node]||!MAPS[d.map])return false;Object.assign(S,{node:d.node,flags:d.flags,done:!!d.done,pending:d.pending,health:Math.max(25,Number(d.health)||100),ammo:d.ammo??12,notes:d.notes||{},inventory:[...new Set([...basicEquipment,...(d.inventory||[])])],completed:d.completed||[],activities:d.activities||Activities.initial(),lights:d.lights||{}});setupMap(d.map,[d.player.x,d.player.y]);toast('Partida recuperada. La historia continúa.');return true}catch{return false}}
@@ -142,7 +151,7 @@ function portrait(id,active,index) {
    <feMorphology in="solid" operator="erode" radius="1" result="edge"/>
    <feComposite in="SourceGraphic" in2="edge" operator="in"/>
   </filter></defs>
-  <image href="assets/art/pixel-portraits.png?v=5.1.0" width="2170" height="725" filter="url(#${edge})"/>
+  <image href="assets/art/pixel-portraits.png?v=5.1.1" width="2170" height="725" filter="url(#${edge})"/>
   <g transform="translate(${mouthX} ${mouthY})">
    <rect class="mouth-frame" x="${-lip/2}" y="-2" width="${lip}" height="6" fill="#442324"/>
    <g class="mouth-frame mouth-wide"><path d="M${-lip/2} -3h${lip}v6h-3v3h${6-lip}v-3h-3z" fill="#382024"/><rect x="-3" y="2" width="7" height="2" fill="#c57561"/></g>
