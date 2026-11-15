@@ -1,24 +1,29 @@
-/* Sombras del Uniforme · exploration + visual novel engine. No external runtime. */
+/* A Debt in Uniform · exploration and dialogue engine. */
 (() => {'use strict';
-const $=id=>document.getElementById(id),C=WorldCore,MAPS=GameMaps,{STORY,COMBATS,ENDINGS,resolveEndingKey}=GameStory,A=GameAudio;
+const $=id=>document.getElementById(id),C=WorldCore,MAPS=GameMaps,{STORY,COMBATS,ENDINGS,HOTSPOTS,resolveEndingKey}=GameStory,A=GameAudio;
 const Activities=GameActivities;
 const canvas=$('world'),ctx=canvas.getContext('2d'),keys=new Set(),assets={},saveKey='sombras.hybrid.v2';
 const names={mateo:'Mateo Morales',elena:'Elena',sofia:'Sofía',vargas:'Comandante Vargas',julian:'Julián',marcos:'Marcos Mendoza',sicario:'Hombre de Los Sombra',guard:'Guardia',narrador:'Narración'};
-const castRects={mateo:[32,0,302,724],vargas:[365,0,278,724],elena:[668,0,260,724],julian:[947,0,295,724],marcos:[1252,0,276,724],sofia:[1545,0,271,724],sicario:[1820,0,352,724],guard:[365,0,278,724]};
-const S={mode:'title',map:'bridge',node:'PROLOGO',done:false,pending:null,player:{x:380,y:650,dir:'down',radius:9},npcs:[],objects:[],path:[],autoTarget:null,health:100,ammo:12,notes:{},inventory:[],flags:{ruta_bien:null,elena_aliada:null,remordimiento:null},lights:{},line:0,lines:[],storyTalk:false,completed:[],activities:Activities.initial(),battle:null,guard:null,alert:0,time:0,debug:false,steps:0,paused:false,conversationOpen:false};
+const basicEquipment=['pistola','radio','camara'];
+const S={mode:'title',map:'bridge',node:'PROLOGO',done:false,pending:null,player:{x:380,y:650,dir:'down',radius:9},npcs:[],objects:[],path:[],autoTarget:null,health:100,ammo:12,notes:{},inventory:[...basicEquipment],flags:{ruta_bien:null,elena_aliada:null,remordimiento:null},lights:{},line:0,lines:[],storyTalk:false,completed:[],activities:Activities.initial(),battle:null,guard:null,alert:0,time:0,debug:false,steps:0,paused:false,conversationOpen:false};
 let width=900,height=650,zoom=1,cam={x:512,y:650},prev=0,toastUntil=0,lastFire=-10,lastTalk=-10,bullets=[],effects=[],typeElapsed=0,typeIndex=0,fullText='',selected=null,introT=0,escapeTime=90,guardPathClock=0,moveActive=false;
 function loadImage(key,url){return new Promise(resolve=>{const im=new Image();im.onload=()=>{assets[key]=im;resolve(true)};im.onerror=()=>{console.warn('Recurso no disponible:',url);resolve(false)};im.src=url})}
 const loading=Promise.all([...Object.entries(MAPS).filter(([,m])=>m.file).map(([id,m])=>loadImage(id,'assets/scenes/'+m.file)),...Array.from({length:17},(_,i)=>loadImage('frame'+i,`assets/frames/sprite_${String(i).padStart(2,'0')}.png`)),loadImage('npcs','assets/art/chibi-atlas.png')]);
 function resize(){const rect=canvas.getBoundingClientRect();width=Math.max(1,rect.width);height=Math.max(1,rect.height);const d=Math.min(window.devicePixelRatio||1,2);canvas.width=width*d;canvas.height=height*d;ctx.setTransform(d,0,0,d,0,0);zoom=Math.max(.65,Math.min(1.25,height/570))}
 window.addEventListener('resize',resize);resize();
-function mode(m){document.body.classList.remove('speaking');S.mode=m;document.body.dataset.mode=m;$('visual-novel').hidden=m!=='vn';$('first-person').hidden=m!=='inspect';$('title').hidden=m!=='title';$('combat-controls').hidden=m!=='combat';$('danger-wrap').hidden=!['stealth','escape'].includes(m);$('interaction').hidden=true;keys.clear();S.path=[];S.autoTarget=null;A.ambience?.(S.map);A.mood(['combat','stealth','escape'].includes(m)?'danger':['kitchen','cafe'].includes(S.map)?'home':'quiet');updateHUD()}
+function mode(m){document.body.classList.remove('speaking');S.mode=m;document.body.dataset.mode=m;$('visual-novel').hidden=m!=='vn';$('first-person').hidden=m!=='inspect';$('title').hidden=m!=='title';$('combat-controls').hidden=m!=='combat';$('danger-wrap').hidden=!['stealth','escape'].includes(m);$('interaction').hidden=true;keys.clear();S.path=[];S.autoTarget=null;A.ambience?.(S.map);A.mood(m);syncAudio();updateHUD()}
 function toast(t){$('toast').textContent=t;$('toast').classList.add('show');toastUntil=S.time+4.5}
 const sceneMap=scene=>scene==='patrol'?'bridge':scene;
 function safePoint(p){return C.nearest(MAPS[S.map],p[0],p[1])}
 function actorBlocks(){return S.npcs.map(a=>({...a,radius:12})).concat(S.battle?.enemies.filter(e=>!e.surrendered).map(a=>({...a,radius:12}))||[])}
 function setupMap(id,position){
  S.battle=null;S.guard=null;S.map=id;const map=MAPS[id],p=safePoint(position||map.spawn);Object.assign(S.player,p);S.npcs=map.npcs.map(([id,x,y],i)=>({id,...C.nearest(map,x,y),dir:'down',phase:i}));
- S.objects=map.objects.map(([kind,label,x,y,text],i)=>({id:id+'-'+i,kind,label,x,y,text}));
+ S.objects=map.objects.map(([kind,label,x,y,text,photo],i)=>({id:id+'-'+i,kind,label,x,y,text,photo}));
+ if(id==='kitchen'){
+  const photo=HOTSPOTS.kitchen.find(item=>item.id==='foto_familiar');
+  const position=C.nearest(map,274,555);
+  S.objects.push({id:photo.id,kind:'photo',label:photo.label,text:photo.text,...position});
+ }
  const anchor=C.nearest(map,...map.story);S.objects.push({id:id+'-cajon',kind:'container',label:'Revisar cajón / pertenencias',x:anchor.x+25,y:anchor.y,text:'Anotación del lugar: conserva las pruebas y evita poner a otros en peligro.'});if(map.rest)S.objects.push({id:id+'-asiento',kind:'seat',label:'Sentarse y descansar',x:anchor.x-30,y:anchor.y});S.path=[];bullets=[];effects=[];cam={...S.player};mode('explore');updateHUD();
 }
 function loadNode(id,keepPosition=false){if(!STORY[id])return;S.node=id;S.done=false;S.pending=null;S.line=0;S.savedStoryLine=null;S.battle=null;S.guard=null;const map=sceneMap(STORY[id].scene);setupMap(map,keepPosition&&S.map===map?[S.player.x,S.player.y]:undefined);save();}
@@ -30,45 +35,152 @@ function storyTarget(){
  if(speaker){let npc=S.npcs.find(n=>n.id===speaker);if(!npc){npc={id:speaker,...p,dir:'down'};S.npcs.push(npc)}return{...npc,kind:'story',label:'Hablar con '+names[speaker]}}
  return{...p,id:'story',kind:'story',label:S.node==='PROLOGO'?'Escuchar la radio policial':'Continuar la investigación'};
 }
-function objective(){const node=STORY[S.node];if(S.mode==='combat')return 'Busca cobertura entre los muebles. Acércate y habla para conseguir la rendición, o alcanza la salida marcada para escapar.';
- if(S.mode==='stealth')return 'Llega al cajón del Archivo B sin llenar la barra de detección. Pulsa E junto al cajón. Las paredes y estanterías cortan la visión.';
- if(S.mode==='escape')return `Sal del edificio por el marcador verde. Evita al guardia y utiliza los obstáculos. Tiempo: ${Math.ceil(escapeTime)} s.`;
- if(sceneMap(node.scene)!==S.map)return `Explora ${MAPS[S.map].name}. La historia te espera en ${MAPS[sceneMap(node.scene)].name}. Usa la salida para regresar.`;
- if(S.done)return S.pending?'Conversación terminada. Explora a tu ritmo y acércate a la salida para seguir la historia.':'Investiga el lugar y conversa con sus habitantes.';
- return `Busca el marcador dorado. ${storyTarget()?.label||'Investiga el lugar'}. Acércate y pulsa E.`;
+function objective() {
+ const node=STORY[S.node];
+ if(S.mode==='combat')return 'Consigue la rendición o llega a la salida verde.';
+ if(S.mode==='stealth')return 'Fotografía el registro en el cajón del Archivo B.';
+ if(S.mode==='escape')return `Sal con las pruebas por el marcador verde. ${Math.ceil(escapeTime)} s.`;
+ if(sceneMap(node.scene)!==S.map)return `Usa la salida verde para volver a ${MAPS[sceneMap(node.scene)].name}.`;
+ if(S.done)return S.pending?'Ve a la salida verde y elige «Seguir la historia».':'Puedes seguir explorando el distrito.';
+ return S.node==='PROLOGO'?'Escucha la radio en el marcador dorado.':`Marcador dorado · ${storyTarget()?.label||'Investigar el lugar'}.`;
 }
-function updateHUD(){const node=STORY[S.node];$('activity-menu').hidden=!(S.mode==='explore'&&S.done&&sceneMap(node.scene)===S.map&&(Activities.nodes[S.node]||[]).length);$('chapter').textContent=node.chapter;$('location').textContent=MAPS[S.map].name;$('clock').textContent=node.time;$('health').textContent='● '+Math.ceil(S.health);$('ammo').textContent=S.ammo+' / 12';$('count').textContent=Object.keys(S.notes).length;$('mission-title').textContent=({explore:'Lo que oculta la noche',combat:'Salir todos con vida',stealth:'Entre los archivos',escape:'Encuentra la salida',vn:'Palabras que pesan',inspect:'Mira un poco más cerca'})[S.mode]||'El turno de Mateo';$('objective').textContent=objective();$('mode-label').textContent=({combat:'ENFRENTAMIENTO',stealth:'INFILTRACIÓN',escape:'HUIDA'})[S.mode]||'EXPLORACIÓN';$('mode-help').textContent=S.mode==='combat'?'Los muebles detienen los proyectiles. El disparo reduce la resistencia; no provoca muertes.':'Habla de cerca. Examina notas y utiliza luces, llaves y puertas. El mundo se detiene durante las conversaciones.';$('danger').value=S.alert;$('danger-label').textContent=S.mode==='escape'?'PERSECUCIÓN':'DETECCIÓN';}
+function environmentNote(item) {
+ if(item)return `E · ${item.label}`;
+ if(S.mode==='combat')return 'Usa cobertura, distracciones o el equipo.';
+ if(S.mode==='stealth')return 'Usa el interruptor y escóndete tras los estantes.';
+ if(S.mode==='escape')return 'Usa los obstáculos y corre con Shift.';
+ return 'Acércate a personas, cartas u objetos. Pulsa E para usarlos.';
+}
+function updateHUD() {
+ const node=STORY[S.node];
+ $('activity-menu').hidden=!(S.mode==='explore'&&S.done&&sceneMap(node.scene)===S.map&&(Activities.nodes[S.node]||[]).length);
+ $('chapter').textContent=node.chapter;$('location').textContent=MAPS[S.map].name;$('clock').textContent=node.time;
+ $('health').textContent='● '+Math.ceil(S.health);$('ammo').textContent=S.ammo+' / 12';
+ $('count').textContent=Object.keys(S.notes).length;
+ $('objective').textContent=objective();
+ $('mode-help').textContent=environmentNote();
+ $('danger').value=S.alert;$('danger-label').textContent=S.mode==='escape'?'PERSECUCIÓN':'DETECCIÓN';
+}
 function save(){try{localStorage.setItem(saveKey,JSON.stringify({version:2,node:S.node,map:S.map,player:S.player,flags:S.flags,done:['combat','stealth','escape'].includes(S.mode)?false:S.done,pending:['combat','stealth','escape'].includes(S.mode)?null:S.pending,health:S.health,ammo:S.ammo,notes:S.notes,inventory:S.inventory,completed:S.completed,activities:S.activities,lights:S.lights}));$('continue-game').disabled=false}catch{}}
-function restore(){try{const d=JSON.parse(localStorage.getItem(saveKey));if(d?.version!==2||!STORY[d.node]||!MAPS[d.map])return false;Object.assign(S,{node:d.node,flags:d.flags,done:!!d.done,pending:d.pending,health:Math.max(25,Number(d.health)||100),ammo:d.ammo??12,notes:d.notes||{},inventory:d.inventory||[],completed:d.completed||[],activities:d.activities||Activities.initial(),lights:d.lights||{}});setupMap(d.map,[d.player.x,d.player.y]);toast('Partida recuperada. La historia continúa.');return true}catch{return false}}
-function newGame(){S.flags={ruta_bien:null,elena_aliada:null,remordimiento:null};S.health=100;S.ammo=12;S.notes={};S.inventory=[];S.completed=[];S.activities=Activities.initial();S.lights={};loadNode('PROLOGO');$('intro').hidden=false;introT=0;A.start();}
-function modal(title,text,buttons=[],paper=false){keys.clear();S.path=[];$('modal').classList.toggle('paper',paper);$('modal-title').textContent=title;$('modal-body').textContent=text;$('modal-actions').replaceChildren();for(const [label,fn] of buttons){const b=document.createElement('button');b.textContent=label;b.onclick=()=>{$('modal').close();fn()};$('modal-actions').append(b)}if(!$('modal').open)$('modal').showModal();A.pause(true)}
-$('modal').addEventListener('close',()=>{keys.clear();A.pause(false);canvas.focus({preventScroll:true})});$('close-modal').onclick=()=>$('modal').close();
-function addNote(id,title,text){const fresh=!S.notes[id];if(fresh){document.body.classList.remove('pickup');void $('app').offsetWidth;document.body.classList.add('pickup');A.effect('paper')}S.notes[id]={title,text};A.effect('inspect');updateHUD();save();modal(title,text,[],true)}
-function journal(){modal('Expediente de la noche',Object.values(S.notes).map((n,i)=>`${String(i+1).padStart(2,'0')} · ${n.title}\n${n.text}`).join('\n\n')||'Aún no tienes documentos. Busca los marcadores de papel y examínalos de cerca.')}
+function restore(){try{const d=JSON.parse(localStorage.getItem(saveKey));if(d?.version!==2||!STORY[d.node]||!MAPS[d.map])return false;Object.assign(S,{node:d.node,flags:d.flags,done:!!d.done,pending:d.pending,health:Math.max(25,Number(d.health)||100),ammo:d.ammo??12,notes:d.notes||{},inventory:[...new Set([...basicEquipment,...(d.inventory||[])])],completed:d.completed||[],activities:d.activities||Activities.initial(),lights:d.lights||{}});setupMap(d.map,[d.player.x,d.player.y]);toast('Partida recuperada. La historia continúa.');return true}catch{return false}}
+function newGame(){S.flags={ruta_bien:null,elena_aliada:null,remordimiento:null};S.health=100;S.ammo=12;S.notes={};S.inventory=[...basicEquipment];S.completed=[];S.activities=Activities.initial();S.lights={};loadNode('PROLOGO');$('intro').hidden=false;introT=0;A.start();}
+function syncAudio(){const dialog=$('modal');A.pause(S.paused||document.hidden||S.mode==='title'||(dialog.open&&dialog.dataset.music!=='keep'))}
+function modal(title,text,buttons=[],options={}) {
+ const {kind='',photo=false,keepMusic=false,kicker='EXPEDIENTE PERSONAL'}=options;
+ const panel=$('modal');
+ panel.dataset.music=keepMusic?'keep':'';
+ if(kind)panel.dataset.document=kind;else delete panel.dataset.document;
+ panel.classList.toggle('paper',['paper','letter','photo'].includes(kind));
+ keys.clear();S.path=[];
+ $('modal-kicker').textContent=kicker;$('modal-title').textContent=title;$('modal-body').textContent=text;
+ $('family-photo').hidden=!photo;$('modal-actions').replaceChildren();
+ for(const [label,fn] of buttons){
+  const button=document.createElement('button');button.textContent=label;
+  button.onclick=()=>{panel.close();syncAudio();fn()};
+  $('modal-actions').append(button);
+ }
+ if(!panel.open)panel.showModal();
+ $('modal-title').focus({preventScroll:true});
+ panel.scrollTop=0;
+ syncAudio();
+}
+$('modal').addEventListener('close',()=>{keys.clear();if(!$('modal').open&&$('modal').dataset.music==='keep'){delete $('modal').dataset.music;A.mood(S.mode)}syncAudio();canvas.focus({preventScroll:true})});$('close-modal').onclick=()=>$('modal').close();
+function displayNote(note) {
+ const {title,text,kind='paper',photo=false}=note;
+ modal(title,text,[],{kind,photo,keepMusic:true,kicker:({letter:'CORRESPONDENCIA PERSONAL',photo:'ÁLBUM FAMILIAR'})[kind]||'EXPEDIENTE PERSONAL'});
+}
+function addNote(id,title,text,details={}) {
+ const fresh=!S.notes[id];
+ if(fresh){
+  document.body.classList.remove('pickup');void $('app').offsetWidth;document.body.classList.add('pickup');A.effect('paper');
+ }
+ const note={title,text,...details};
+ S.notes[id]=note;updateHUD();save();displayNote(note);
+}
+function journal() {
+ const notes=Object.values(S.notes);
+ const text=notes.map((note,i)=>`${String(i+1).padStart(2,'0')} · ${note.title}\n${note.text}`).join('\n\n');
+ const originals=notes.filter(note=>['letter','photo'].includes(note.kind)).map(note=>['Ver · '+note.title,()=>displayNote(note)]);
+ modal('Expediente de la noche',text||'Aún no tienes documentos. Busca los marcadores de papel y examínalos de cerca.',originals);
+}
+function useRadio(logId) {
+ const {label,text}=HOTSPOTS.patrol[0];
+ const support=S.activities.used.includes('PROLOGO:radio');
+ const message=S.node==='PROLOGO'?text:support?(S.activities.dispatch?'Central: el apoyo del distrito está disponible.':'Central: mantén el canal abierto. Tu patrulla sigue en el sector.'):'Central: canal abierto. Informa si necesitas apoyo.';
+ if(logId){S.notes[logId]={title:label,text:message};updateHUD();save();}
+ const actions=S.node==='PROLOGO'?[['Asignar apoyo',()=>startActivity('radio')]]:[];
+ A.effect('radio');
+ modal(label,message,actions,{kind:'radio',keepMusic:true,kicker:'COMUNICACIONES DEL DISTRITO'});
+}
+function equipment() {
+ if(S.mode==='title'||!$('intro').hidden)return;
+ const items=[`Pistola de servicio · ${S.ammo} / 12`,'Radio policial','Cámara del teléfono'];
+ if(S.inventory.includes('archivo'))items.push('Llave del Archivo B');
+ const actions=[['Sintonizar radio',()=>useRadio()]];
+ if(S.mode==='combat')actions.push(['Disparo de advertencia',()=>shoot()],['Recargar',reload]);
+ if(S.mode==='stealth')actions.push(['Fotografiar el registro',()=>interact(interactions().find(item=>item.kind==='goal'))]);
+ modal('Equipo de Mateo',items.join('\n'),actions,{keepMusic:true,kicker:'EQUIPO DE SERVICIO'});
+}
 function travelMenu(){if(!['explore'].includes(S.mode)){toast('Termina este encuentro antes de cambiar de zona.');return}const map=MAPS[S.map],near=Math.hypot(S.player.x-map.exit[0],S.player.y-map.exit[1])<85;
  const buttons=[];if(near&&S.pending)buttons.push(['Seguir la historia →',()=>loadNode(S.pending,true)]);
  if(near)for(const [id,m] of Object.entries(MAPS))if(id!==S.map)buttons.push([m.name,()=>{setupMap(id);save()}]);
  modal('Distrito Norte',near?'Elige un destino. Las conversaciones y decisiones de la historia se conservan.':`Estás en ${map.name}. Acércate a la salida verde para viajar. La historia está en ${MAPS[sceneMap(STORY[S.node].scene)].name}.`,buttons);
 }
 function background(el,index){el.style.backgroundPosition=`${index%3*50}% ${Math.floor(index/3)*50}%`}
-function oldFullBody(id,active){const r=castRects[id]||castRects.mateo;return `<div class="fullbody ${active?'active':''} ${id==='sofia'?'child':''}" aria-label="${names[id]||id}"><svg viewBox="${r.join(' ')}" role="img" aria-label="${names[id]||id}, cuerpo completo"><image href="assets/art/dialogue-cast.png" width="2172" height="724"/></svg></div>`}
-const busts={mateo:[45,0,180,255,154,81],vargas:[271,0,187,255,377,83],elena:[495,0,185,260,608,78],julian:[715,0,185,260,820,79],marcos:[947,0,185,260,1038,81],sofia:[1160,165,155,220,1262,231],sicario:[1360,0,195,270,1455,85],guard:[271,0,187,255,377,83]};
-function fullBody(id,active){const r=busts[id]||busts.mateo;return '<div class="fullbody bust '+(active?'active':'')+'"><svg viewBox="'+r.slice(0,4).join(' ')+'" role="img" aria-label="Retrato de '+(names[id]||id)+'"><image href="assets/art/pixel-characters.png" width="1600" height="534"/><g class="mouth-frame" transform="translate('+r[4]+' '+r[5]+')"><rect x="-4" y="-1" width="8" height="3" fill="#452528"/><rect x="-2" y="0" width="4" height="1" fill="#bc7860"/></g></svg></div>'}
+const busts={
+ mateo:[68,7,242,339,222,112,15], vargas:[372,5,248,341,523,111,16],
+ elena:[674,23,240,332,820,119,17], julian:[964,12,252,340,1121,109,17],
+ marcos:[1263,14,253,337,1417,111,15], sofia:[1568,221,211,286,1703,307,17],
+ sicario:[1830,10,264,343,1989,114,15]
+};
+function portrait(id,active,index) {
+ const [x,y,width,height,mouthX,mouthY,lip]=busts[id==='guard'?'vargas':id]||busts.mateo;
+ const edge='portrait-edge-'+id;
+ return `<div class="bust${active?" active":""}" data-facing="${index===0?"right":"left"}"><svg viewBox="${x} ${y} ${width} ${height}" preserveAspectRatio="xMidYMax meet" role="img" aria-label="Retrato de ${names[id]||id}">
+  <defs><filter id="${edge}" filterUnits="userSpaceOnUse" x="${x}" y="${y}" width="${width}" height="${height}">
+   <feComponentTransfer in="SourceAlpha" result="solid"><feFuncA type="discrete" tableValues="0 0 0 1"/></feComponentTransfer>
+   <feMorphology in="solid" operator="erode" radius="1" result="edge"/>
+   <feComposite in="SourceGraphic" in2="edge" operator="in"/>
+  </filter></defs>
+  <image href="assets/art/pixel-portraits.png" width="2170" height="725" filter="url(#${edge})"/>
+  <g transform="translate(${mouthX} ${mouthY})">
+   <rect class="mouth-frame" x="${-lip/2}" y="-2" width="${lip}" height="6" fill="#442324"/>
+   <g class="mouth-frame mouth-wide"><path d="M${-lip/2} -3h${lip}v6h-3v3h${6-lip}v-3h-3z" fill="#382024"/><rect x="-3" y="2" width="7" height="2" fill="#c57561"/></g>
+  </g>
+ </svg></div>`;
+}
+function conversationCast() {
+ const speakers=[...new Set(S.lines.map(line=>line.speaker).filter(id=>id!=="narrador"))];
+ const left=speakers.length<2||speakers.includes("mateo")?"mateo":speakers[0];
+ const right=S.lines.slice(0,S.line+1).findLast(({speaker})=>speaker!==left&&speaker!=="narrador")?.speaker
+   ||speakers.find(id=>id!==left);
+ return right?[left,right]:[left];
+}
 function activityPanel(){const node=S.node,types=Activities.nodes[node]||[],buttons=[];for(const type of types){const used=S.activities.used.includes(node+':'+type);buttons.push([(used?'✓ ':'▶ ')+Activities.config[type].title,()=>startActivity(type)])}modal('Acciones en este lugar',Activities.summary(S.activities),buttons)}
 function startActivity(type){const key=S.node+':'+type,cfg=Activities.config[type];if(!cfg||!(Activities.nodes[S.node]||[]).includes(type))return;if(S.activities.used.includes(key)){modal(cfg.title,S.activities.results[key]+'\n\n'+Activities.summary(S.activities));return}modal(cfg.title,cfg.prompt+'\n\n'+Activities.summary(S.activities),cfg.options.map((o,i)=>[o[0],()=>{const result=Activities.resolve(S.activities,S.node,type,i);if(!result){toast('No tienes suficientes recursos.');startActivity(type);return}S.health=Math.min(100,S.health+result.health);A.effect('success');save();updateHUD();modal('Resultado · '+cfg.title,result.text+'\n\n'+Activities.summary(S.activities),[['Volver a las acciones',activityPanel],['Seguir explorando',()=>{}]])}]));const buttons=$('modal-actions').children;cfg.options.forEach((o,i)=>{if(!Activities.allowed(S.activities,type,i)){buttons[i].disabled=true;buttons[i].title='Recursos insuficientes'}})}
 function availableActivities(){return (Activities.nodes[S.node]||[]).filter(t=>!S.activities.used.includes(S.node+':'+t))}
 function startTalk(story=false,npc){if(!story)S.savedStoryLine=S.line;else if(Number.isInteger(S.savedStoryLine)){S.line=S.savedStoryLine;S.savedStoryLine=null}S.storyTalk=story;S.returnPosition={x:S.player.x,y:S.player.y,map:S.map};S.lines=story?STORY[S.node].lines:[{speaker:npc.id,name:names[npc.id],dir:'(La conversación se queda entre ustedes)',text:({elena:'Hay cosas que pesan menos cuando se comparten, Mateo. Cuando termines, vuelve a casa.',sofia:'¡Papá! ¿Ya viste mi dibujo? Te guardé un sitio en la mesa.',vargas:'El distrito está inquieto. Haz tu ronda y recuerda que cada decisión tiene consecuencias.',julian:S.map==='cafe'?'Siéntate un momento. Un café y una conversación también pueden cambiar una noche.':'Si necesitas ayuda, aquí tienes mi taller. No dejes que nadie decida por ti.',marcos:'Esta ciudad tiene muchos caminos, agente. Elige bien por cuál vas a caminar.',guard:'El archivo está en la sala del fondo. Mantén despejados los pasillos.'})[npc.id]||'Es una noche larga. Cuida a los tuyos.'}];if(!story)S.line=0;mode('vn');showLine()}
-function showLine(){const l=S.lines[S.line];if(!l)return;fullText=l.text;document.body.classList.add('speaking');typeIndex=0;typeElapsed=0;$('dialogue-text').textContent='';$('speaker').textContent=l.name||names[l.speaker];$('direction').textContent=l.dir||'';$('choices').replaceChildren();$('vn-place').textContent=MAPS[S.map].name+' · '+STORY[S.node].time;background($('vn-background'),MAPS[S.map].bg);
- let other=S.lines.find(v=>!['mateo','narrador'].includes(v.speaker))?.speaker||'mateo';if(l.speaker!=='mateo'&&l.speaker!=='narrador')other=l.speaker;
- const chars=other==='mateo'?['mateo']:['mateo',other];$('fullbody-cast').innerHTML=chars.map(id=>fullBody(id,id===l.speaker||l.speaker==='narrador')).join('');$('close-talk').hidden=false;
+function showLine(){const l=S.lines[S.line];if(!l)return;fullText=l.text;document.body.classList.remove('pickup');document.body.classList.add('speaking');typeIndex=0;typeElapsed=0;$('dialogue-text').textContent='';$('speaker').textContent=l.name||names[l.speaker];$('direction').textContent=l.dir||'';$('choices').replaceChildren();$('vn-place').textContent=MAPS[S.map].name+' · '+STORY[S.node].time;background($('vn-background'),MAPS[S.map].bg);
+ $('fullbody-cast').innerHTML=conversationCast().map((id,index)=>portrait(id,id===l.speaker,index)).join('');$('close-talk').hidden=false;
 }
 function showChoices(){document.body.classList.remove('speaking');const node=STORY[S.node];if(S.storyTalk&&S.line===S.lines.length-1&&node.choices){for(const ch of node.choices){const b=document.createElement('button');b.textContent=ch.label;b.onclick=()=>{ch.effect(S.flags);finishTalk(ch.next)};$('choices').append(b)}$('dialogue-tip').textContent='ELIGE QUÉ HACER';}else $('dialogue-tip').textContent=S.line===S.lines.length-1?'ESPACIO · Terminar y volver al mapa':'ESPACIO o clic · Continuar'}
 function continueTalk(){if(S.mode!=='vn')return;if(typeIndex<fullText.length){typeIndex=fullText.length;$('dialogue-text').textContent=fullText;showChoices();return}if(S.storyTalk&&S.line===S.lines.length-1&&STORY[S.node].choices)return;if(S.line<S.lines.length-1){S.line++;showLine()}else finishTalk()}
 function finishTalk(next,skipActivities=false){if(S.storyTalk&&!skipActivities&&availableActivities().length){modal('Antes de continuar', 'Puedes resolver las interacciones de este lugar. Sus consecuencias se guardan en tu partida.',[['Abrir interacciones',activityPanel],['Continuar conversación',()=>finishTalk(next,true)]]);return}const node=STORY[S.node],story=S.storyTalk;if(!story&&Number.isInteger(S.savedStoryLine)){S.line=S.savedStoryLine;S.savedStoryLine=null}mode('explore');if(story){S.done=true;S.line=0;if(next||node.next)S.pending=next||node.next;else if(node.combatId){startCombat(node.combatId);return}else if(node.stealth){startStealth();return}else if(node.endingKey){showEnding(node.endingKey);return}save();toast('Conversación terminada. Puedes explorar y continuar por la salida.')}updateHUD();}
 $('close-talk').onclick=()=>{mode('explore');toast('Vuelves al mapa. Habla otra vez para retomar la conversación.')};$('dialogue-text').onclick=continueTalk;
 function inspect(obj){S.inspectObject=obj;mode('inspect');background($('inspect-background'),MAPS[S.map].bg);$('inspect-title').textContent=obj.label;$('inspect-items').replaceChildren();
- const entries=obj.label.includes('patrulla')?[['Radio policial','La frecuencia cruje: un aviso llega desde el minimercado de Barrio Norte.'],['Dibujo de Sofía','Una patrulla azul y una frase escrita con crayón: «Para papá».'],['Factura vencida','Tercer aviso de la farmacia. El tratamiento de Sofía no puede esperar.']]:obj.label.includes('café')?[['Beber café','Te tomas un respiro. Aún queda mucho por hacer.']]:[['Examinar de cerca',obj.label.includes('Mochila')?'Dentro hay un dibujo de la familia y una carta para Mateo.':'Una anotación conecta los pagos de Los Sombra con el Muelle 7. Haz una copia y conserva el original.']];
- for(const [title,text] of entries){const b=document.createElement('button');b.textContent=title;b.onclick=()=>{if(title==='Beber café'){S.health=100;updateHUD()}addNote(obj.id+title,title,text)};$('inspect-items').append(b)}
+ const entries=S.map==='bridge'?HOTSPOTS.patrol.slice(0,3).map(item=>[item.label,item.text,item.id]):
+  S.map==='cafe'?[['Beber café','Te tomas un respiro. Aún queda mucho por hacer.']]:
+  S.map==='school'?[['Carta de Sofía','Papá,\n\nYo sé que vendrás por mí. No te olvides de respirar cuando tengas miedo. Guarda nuestra foto.\n\nCon cariño,\nSofía','letter']]:
+  [['Examinar de cerca','Una anotación conecta los pagos de Los Sombra con el Muelle 7. Haz una copia y conserva el original.']];
+ for(const [title,text,kind] of entries){
+  const button=document.createElement('button');button.textContent=title;
+  button.onclick=()=>{
+   if(kind==='radio_policial'){useRadio(obj.id+'-radio');return;}
+   if(S.map==='cafe'){S.health=100;updateHUD();}
+   addNote(obj.id+title,title,text,kind==='letter'?{kind,photo:true}:{});
+  };
+  $('inspect-items').append(button);
+ }
 }
 $('leave-inspect').onclick=()=>{mode('explore');save()};
 function interactions(){const map=MAPS[S.map],items=[...S.objects,...S.npcs.map(n=>({...n,kind:'npc',label:'Hablar con '+names[n.id]}))];const target=storyTarget();if(target&&S.mode==='explore')items.unshift(target);
@@ -81,7 +193,7 @@ function interactions(){const map=MAPS[S.map],items=[...S.objects,...S.npcs.map(
 }
 function nearestInteraction(){const p=S.player;return interactions().filter(o=>Math.hypot(p.x-o.x,p.y-o.y)<70).sort((a,b)=>(a.kind==='story'?-100:Math.hypot(p.x-a.x,p.y-a.y))-(b.kind==='story'?-100:Math.hypot(p.x-b.x,p.y-b.y)))[0]}
 function interact(obj=nearestInteraction()){if(!obj||!['explore','stealth','escape','combat'].includes(S.mode))return;S.path=[];S.autoTarget=null;if(Math.hypot(obj.x-S.player.x,obj.y-S.player.y)>74){toast('Acércate un poco más.');return}
- switch(obj.kind){case 'activity':activityPanel();break;case 'story':startTalk(true);break;case 'npc':startTalk(false,obj);break;case 'note':addNote(obj.id,obj.label,obj.text);break;case 'inspect':inspect(obj);break;case 'exit':travelMenu();break;case 'light':S.lights[S.map]=!S.lights[S.map];A.effect('switch');save();toast(S.lights[S.map]?'Luz apagada. Es más difícil que te detecten.':'Luz encendida.');break;case 'seat':S.health=Math.min(100,S.health+5);updateHUD();save();toast('Descansas un momento. +5 de energía.');break;case 'container':addNote(obj.id,obj.label,obj.text||'Entre los objetos encuentras un recibo con destino al Muelle 7.');break;case 'key':A.effect('key');if(!S.inventory.includes('archivo'))S.inventory.push('archivo');addNote('llave','Llave del Archivo B','Una pequeña llave de latón. Abre el cajón del archivo de la comisaría.');break;case 'locked':if(S.mode==='stealth'){recoverEvidence();break}if(S.inventory.includes('archivo'))addNote('registro','Registro reservado','Muelle 7. Autorización: Vargas. Conserva una copia y busca a alguien de confianza.');else toast('Está cerrado. Busca el llavero en la recepción de la comisaría.');break;case 'goal':recoverEvidence();break;case 'escape':finishEscape();break;case 'flee':finishCombat(true);break;case 'env':if(!S.battle.envUsed){S.battle.envUsed=true;S.battle.enemies.forEach(e=>{e.pressure-=40;e.stun=5;if(e.pressure<=0)e.surrendered=true});A.effect('alert');toast('El entorno distrae a los adversarios. Aprovecha para hablar o moverte.');checkCombat()}else toast('Ya utilizaste este elemento del entorno.');break}
+ switch(obj.kind){case 'activity':activityPanel();break;case 'story':if(S.node==='PROLOGO')A.effect('radio');startTalk(true);break;case 'npc':startTalk(false,obj);break;case 'note':addNote(obj.id,obj.label,obj.text);break;case 'letter':case 'photo':addNote(obj.id,obj.label,obj.text,{kind:obj.kind,photo:obj.photo||obj.kind==='photo'});break;case 'inspect':inspect(obj);break;case 'exit':travelMenu();break;case 'light':S.lights[S.map]=!S.lights[S.map];A.effect('switch');save();toast(S.lights[S.map]?'Luz apagada. Es más difícil que te detecten.':'Luz encendida.');break;case 'seat':S.health=Math.min(100,S.health+5);updateHUD();save();toast('Descansas un momento. +5 de energía.');break;case 'container':addNote(obj.id,obj.label,obj.text||'Entre los objetos encuentras un recibo con destino al Muelle 7.');break;case 'key':A.effect('key');if(!S.inventory.includes('archivo'))S.inventory.push('archivo');addNote('llave','Llave del Archivo B','Una pequeña llave de latón. Abre el cajón del archivo de la comisaría.');break;case 'locked':if(S.mode==='stealth'){recoverEvidence();break}if(S.inventory.includes('archivo'))addNote('registro','Registro reservado','Muelle 7. Autorización: Vargas. Conserva una copia y busca a alguien de confianza.');else toast('Está cerrado. Busca el llavero en la recepción de la comisaría.');break;case 'goal':recoverEvidence();break;case 'escape':finishEscape();break;case 'flee':finishCombat(true);break;case 'env':if(!S.battle.envUsed){S.battle.envUsed=true;S.battle.enemies.forEach(e=>{e.pressure-=40;e.stun=5;if(e.pressure<=0)e.surrendered=true});A.effect('alert');toast('El entorno distrae a los adversarios. Aprovecha para hablar o moverte.');checkCombat()}else toast('Ya utilizaste este elemento del entorno.');break}
 }
 function startCombat(id){const def=COMBATS[id],map=MAPS[sceneMap(def.scene)];if(S.map!==sceneMap(def.scene))setupMap(sceneMap(def.scene));S.npcs=[];S.ammo=12;S.health=Math.max(60,S.health);lastFire=-10;lastTalk=-10;
  S.battle={id,envUsed:false,enemies:def.enemies.map((e,i)=>({id:'enemy'+i,char:i===0?'marcos':'guard',...C.nearest(map,...(map.battle?.[i]||[590+i*50,650])),dir:'down',pressure:S.activities.dispatch&&id==='COMBAT_2'?86:100,stun:0,surrendered:false,path:[],think:0,windup:0,cooldown:1.5+i*.7}))};mode('combat');toast('Puedes negociar, distraer, protegerte tras los muebles o llegar a la salida verde.');}
@@ -93,9 +205,9 @@ function shoot(target){if(S.mode!=='combat'||S.time-lastFire<.55)return;if(S.amm
 function reload(){if(S.mode==='combat'){S.ammo=12;lastFire=S.time+.7;toast('Recargando: busca cobertura.');A.effect('inspect');updateHUD()}}
 function cover(){if(S.mode==='combat')toast(isCover()?'El mueble te protege. Mantén C para reducir el daño y moverte despacio.':'Busca una mesa, un contenedor o una estantería para cubrirte.')}
 function startStealth(){if(S.map!=='archive')setupMap('archive');S.npcs=[];Object.assign(S.player,C.nearest(MAPS.archive,674,400));S.guard={id:'guard',x:768,y:282,dir:'left',path:[],waypoint:0};S.alert=0;guardPathClock=0;mode('stealth');toast('Las paredes bloquean la visión. Apaga la luz o espera a que el guardia mire hacia otro lado.');}
-function recoverEvidence(){if(S.mode!=='stealth')return;S.notes.archivo={title:'Transferencias del Muelle 7',text:'Vargas autorizó los pagos a Marcos Mendoza. Las fotografías quedan guardadas en el expediente.'};escapeTime=90;S.alert=0;S.escapeStart={...S.player};mode('escape');toast('Pruebas fotografiadas. Ahora sal del edificio sin que te alcance el guardia.');updateHUD()}
+function recoverEvidence(){if(S.mode!=='stealth')return;A.effect('camera');S.notes.archivo={title:'Transferencias del Muelle 7',text:'Vargas autorizó los pagos a Marcos Mendoza. Las fotografías quedan guardadas en el expediente.'};escapeTime=90;S.alert=0;S.escapeStart={...S.player};mode('escape');toast('Pruebas fotografiadas. Ahora sal del edificio sin que te alcance el guardia.');updateHUD()}
 function finishEscape(){S.guard=null;S.done=true;S.pending='N2A_LLAMADA';mode('explore');toast('Has salido con las pruebas. Continúa desde la salida cuando estés listo.');save()}
-function showEnding(key){mode('explore');const e=ENDINGS[key];S.pending=null;modal(e.title,e.body+'\n\n'+e.reflection+'\n\nBALANCE DE LA RUTA\n'+Activities.summary(S.activities),[['Volver a empezar',newGame],['Seguir explorando',()=>{S.done=true;updateHUD()}]]);save()}
+function showEnding(key){mode('explore');const e=ENDINGS[key];S.pending=null;A.mood(e.type==='good'?'hope':'loss');modal(e.title,e.body+'\n\n'+e.reflection+'\n\nBALANCE DE LA RUTA\n'+Activities.summary(S.activities),[['Volver a empezar',newGame],['Seguir explorando',()=>{S.done=true;updateHUD()}]],{keepMusic:true});save()}
 function failEncounter(){bullets=[];modal('Un paso atrás para seguir','Mateo se pone a cubierto. Puedes reintentar desde el inicio del encuentro conservando tus decisiones.',[['Reintentar',()=>{S.health=100;if(S.mode==='combat')startCombat(S.battle.id);else startStealth()}]]);S.health=25;updateHUD()}
 function updateBattle(dt){const map=MAPS[S.map];for(const e of S.battle.enemies){if(e.surrendered)continue;if(e.stun>0){e.stun-=dt;e.windup=0;continue}const d=Math.hypot(S.player.x-e.x,S.player.y-e.y),visible=C.lineClear(map,e,S.player);e.cooldown-=dt;e.think-=dt;
   if(d<360&&visible){e.dir=C.direction(S.player.x-e.x,S.player.y-e.y);if(e.cooldown<=0){e.windup+=dt;if(e.windup>1.2){const a=Math.atan2(S.player.y-e.y,S.player.x-e.x);bullets.push({x:e.x,y:e.y,vx:Math.cos(a)*230,vy:Math.sin(a)*230,owner:'enemy',life:2});e.windup=0;e.cooldown=2.8;A.effect('alert')}}}
@@ -116,6 +228,7 @@ function tick(dt){S.time+=dt;if(S.time>toastUntil)$('toast').classList.remove('s
  if(moveActive){S.steps+=dt*9;if(Math.floor(S.steps)!==Math.floor(S.steps-dt*9))A.effect('step');}
  if(S.mode==='combat')updateBattle(dt);if(['stealth','escape'].includes(S.mode)&&S.guard)updateGuard(dt);
  selected=nearestInteraction();$('interaction').hidden=!selected;if(selected)$('interaction-label').textContent=selected.label;
+ const hint=environmentNote(selected);if($('mode-help').textContent!==hint)$('mode-help').textContent=hint;
  effects.forEach(e=>e.t-=dt);effects=effects.filter(e=>e.t>0);
 }
 function drawCafe(){ctx.fillStyle='#12141e';ctx.fillRect(0,0,1024,1024);ctx.fillStyle='#705146';ctx.fillRect(75,120,875,835);for(let y=180;y<940;y+=40)for(let x=90;x<934;x+=40){ctx.fillStyle=(x/40+y/40)%2?'#9a795c':'#987c62';ctx.fillRect(x,y,39,39)}ctx.fillStyle='#3b3440';ctx.fillRect(80,120,864,70);ctx.fillStyle='#d5b47c';ctx.font='24px Georgia';ctx.fillText('CAFÉ LA ESQUINA',360,163);for(const r of MAPS.cafe.solids){ctx.fillStyle='#38272a';ctx.fillRect(r[0]+3,r[1]+8,r[2],r[3]);ctx.fillStyle='#6d4940';ctx.fillRect(...r);ctx.fillStyle='#b3815c';ctx.fillRect(r[0]+4,r[1]+4,r[2]-8,8);if(r[2]===130){ctx.fillStyle='#e4d8b8';ctx.beginPath();ctx.arc(r[0]+45,r[1]+35,10,0,Math.PI*2);ctx.fill();ctx.fillStyle='#263b3c';ctx.fillRect(r[0]+80,r[1]+22,16,26)}}ctx.fillStyle='#e9c486';for(const x of [260,510,760]){ctx.fillRect(x,208,28,22);ctx.fillStyle='#251f28';ctx.fillRect(x+5,212,18,12);ctx.fillStyle='#e9c486'}}
@@ -131,7 +244,7 @@ function render(){ctx.clearRect(0,0,width,height);ctx.fillStyle='#10131e';ctx.fi
  if(S.debug){ctx.fillStyle='#20e88822';map.floors.forEach(r=>ctx.fillRect(...r));ctx.fillStyle='#e6506866';map.solids.forEach(r=>ctx.fillRect(...r))}
  if(S.path.length){ctx.strokeStyle='#b8d8ce77';ctx.lineWidth=2;ctx.setLineDash([3,6]);ctx.beginPath();ctx.moveTo(S.player.x,S.player.y);S.path.forEach(p=>ctx.lineTo(p.x,p.y));ctx.stroke();ctx.setLineDash([])}
  if(S.guard){const g=S.guard,angle=({right:0,down:Math.PI/2,left:Math.PI,up:-Math.PI/2})[g.dir],range=S.lights[S.map]?105:190;ctx.fillStyle=S.alert>60?'#e0635033':'#f6df8733';ctx.beginPath();ctx.moveTo(g.x,g.y);for(let a=angle-.9;a<=angle+.9;a+=.04){let r=0;while(r<range&&C.walkable(map,g.x+Math.cos(a)*r,g.y+Math.sin(a)*r,2))r+=5;ctx.lineTo(g.x+Math.cos(a)*r,g.y+Math.sin(a)*r)}ctx.closePath();ctx.fill()}
- for(const o of interactions()){if(o.kind==='npc')continue;marker(o,['exit','flee','escape'].includes(o.kind)?'#9ec8b7':o.kind==='story'?'#f0cb84':'#9cb9d0',({story:'!',note:'▤',light:'◉',key:'⚿',locked:'▣',goal:'★',inspect:'⌕',exit:'↗',escape:'↗',flee:'↗',env:'◈'})[o.kind]||'·')}
+ for(const o of interactions()){if(o.kind==='npc')continue;marker(o,['exit','flee','escape'].includes(o.kind)?'#9ec8b7':o.kind==='story'?'#f0cb84':'#9cb9d0',({story:'!',note:'▤',letter:'▤',photo:'▧',light:'◉',key:'⚿',locked:'▣',goal:'★',inspect:'⌕',exit:'↗',escape:'↗',flee:'↗',env:'◈'})[o.kind]||'·')}
  const actors=[...S.npcs,{...S.player,id:'mateo'},...(S.guard?[S.guard]:[]),...(S.battle?.enemies.map(e=>({...e,id:e.char}))||[])];actors.sort((a,b)=>a.y-b.y).forEach(a=>sprite(a,a.id==='mateo'?moveActive:a.id==='guard'&&!!S.guard));
  if(S.battle)for(const e of S.battle.enemies){if(e.surrendered)continue;ctx.fillStyle='#0b1729';ctx.fillRect(e.x-20,e.y-64,40,4);ctx.fillStyle='#d6b37a';ctx.fillRect(e.x-20,e.y-64,40*e.pressure/100,4);if(e.windup>0){ctx.strokeStyle='#e9a970';ctx.setLineDash([5,6]);ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(e.x,e.y);ctx.lineTo(S.player.x,S.player.y);ctx.stroke();ctx.setLineDash([])}}
  for(const b of bullets){ctx.fillStyle=b.owner==='player'?'#d1f2ff':'#f7c57c';ctx.beginPath();ctx.arc(b.x,b.y,3,0,Math.PI*2);ctx.fill()}for(const e of effects){ctx.strokeStyle='#f5e2ae';ctx.beginPath();ctx.arc(e.x,e.y,15*(1-e.t/.3),0,Math.PI*2);ctx.stroke()}
@@ -143,11 +256,11 @@ function frame(t){const dt=Math.min(.04,(t-prev)/1000||.016);prev=t;tick(dt);ren
 canvas.addEventListener('pointerdown',e=>{if(!['explore','combat','stealth','escape'].includes(S.mode)||$('modal').open||!$('intro').hidden)return;A.start();canvas.focus({preventScroll:true});const r=canvas.getBoundingClientRect(),target={x:(e.clientX-r.left-width/2)/zoom+cam.x,y:(e.clientY-r.top-height/2)/zoom+cam.y};
  if(S.mode==='combat'){const enemy=S.battle.enemies.find(a=>!a.surrendered&&Math.abs(a.x-target.x)<25&&target.y>a.y-65&&target.y<a.y+10);if(enemy){shoot(enemy);return}}
  const obj=interactions().filter(o=>Math.hypot(o.x-target.x,o.y-14-target.y)<38).sort((a,b)=>Math.hypot(a.x-target.x,a.y-target.y)-Math.hypot(b.x-target.x,b.y-target.y))[0];if(obj&&Math.hypot(obj.x-S.player.x,obj.y-S.player.y)<70){interact(obj);return}S.path=C.findPath(MAPS[S.map],S.player,obj||target,actorBlocks());S.autoTarget=obj||null;if(S.path.length<2)toast('Ese paso está bloqueado. Busca otro camino.');});
-window.addEventListener('keydown',e=>{const k=e.key.toLowerCase();if($('modal').open)return;if(['arrowup','arrowdown','arrowleft','arrowright',' ','tab'].includes(k)&&k!=='tab')e.preventDefault();if(!e.repeat){A.start();if(k==='escape'){if(S.mode==='vn')$('close-talk').click();else if(S.mode==='inspect')$('leave-inspect').click();else pause();return}if(S.mode==='vn'&&(k===' '||k==='enter'||k==='e')){continueTalk();return}if(k==='f2'){e.preventDefault();S.debug=!S.debug;return}if(k==='e')interact();if(k==='j')journal();if(k==='m')travelMenu();if(k==='f')shoot();if(k==='r')reload();if(k==='c')cover()}if(['explore','combat','stealth','escape'].includes(S.mode))keys.add(k)});
-window.addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));window.addEventListener('blur',()=>{keys.clear();S.paused=true;A.pause(true)});window.addEventListener('focus',()=>{S.paused=false;A.pause($('modal').open)});document.addEventListener('visibilitychange',()=>{keys.clear();A.pause(document.hidden||$('modal').open)});
+window.addEventListener('keydown',e=>{const k=e.key.toLowerCase();if($('modal').open)return;if(['arrowup','arrowdown','arrowleft','arrowright',' ','tab'].includes(k)&&k!=='tab')e.preventDefault();if(!e.repeat){if(S.mode!=='title')A.start();if(k==='escape'){if(S.mode==='vn')$('close-talk').click();else if(S.mode==='inspect')$('leave-inspect').click();else pause();return}if(S.mode==='vn'&&(k===' '||k==='enter'||k==='e')){continueTalk();return}if(k==='f2'){e.preventDefault();S.debug=!S.debug;return}if(k==='e')interact();if(k==='j'&&S.mode!=='title')journal();if(k==='i')equipment();if(k==='m'&&S.mode!=='title')travelMenu();if(k==='f')shoot();if(k==='r')reload();if(k==='c')cover()}if(['explore','combat','stealth','escape'].includes(S.mode))keys.add(k)});
+window.addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));window.addEventListener('blur',()=>{keys.clear();S.paused=true;syncAudio()});window.addEventListener('focus',()=>{S.paused=false;syncAudio()});document.addEventListener('visibilitychange',()=>{keys.clear();syncAudio()});
 function pause(){if(S.mode==='title')return;modal('Un momento para respirar','La partida está en pausa. Los personajes, las detecciones y los proyectiles se detienen.',[['Guardar partida',()=>{save();toast('Progreso guardado.')}],['Volver al inicio',()=>{save();mode('title')}]]);}
-$('new-game').onclick=()=>loading.then(newGame);$('continue-game').onclick=()=>loading.then(()=>{A.start();if(!restore())toast('No hay una partida guardada compatible.')});try{$('continue-game').disabled=!localStorage.getItem(saveKey)}catch{$('continue-game').disabled=true}
-$('skip-intro').onclick=()=>{$('intro').hidden=true;canvas.focus()};$('activity-menu').onclick=activityPanel;$('journal').onclick=journal;$('district').onclick=travelMenu;$('pause').onclick=pause;$('sound').onclick=()=>{$('sound').textContent=A.toggle()?'♪̸':'♫'};$('interact-btn').onclick=()=>interact();$('negotiate').onclick=negotiate;$('cover').onclick=cover;$('reload').onclick=reload;$('fire').onclick=()=>shoot();$('touch-e').onclick=()=>interact();
+$('new-game').onclick=()=>{A.start();loading.then(newGame)};$('continue-game').onclick=()=>{A.start();loading.then(()=>{if(!restore())toast('No hay una partida guardada compatible.')})};try{$('continue-game').disabled=!localStorage.getItem(saveKey)}catch{$('continue-game').disabled=true}
+$('skip-intro').onclick=()=>{$('intro').hidden=true;canvas.focus()};$('activity-menu').onclick=activityPanel;$('journal').onclick=journal;$('equipment').onclick=equipment;$('district').onclick=travelMenu;$('pause').onclick=pause;$('sound').onclick=()=>{const button=$('sound'),muted=A.toggle(),label=muted?'Activar sonido':'Silenciar sonido';button.textContent=muted?'♪̸':'♫';button.title=label;button.setAttribute('aria-label',label);if(!muted)A.start()};$('interact-btn').onclick=()=>interact();$('negotiate').onclick=negotiate;$('cover').onclick=cover;$('reload').onclick=reload;$('fire').onclick=()=>shoot();$('touch-e').onclick=()=>interact();
 document.querySelectorAll('[data-key]').forEach(b=>{b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);keys.add(b.dataset.key)});for(const ev of ['pointerup','pointercancel','lostpointercapture'])b.addEventListener(ev,()=>keys.delete(b.dataset.key))});
 // Deterministic QA entry points are enabled only with ?qa=1, never during normal play.
 const params=new URLSearchParams(location.search);if(params.get('qa')==='1'){window.__GAME_QA__={S,loadNode,setupMap,startTalk,finishTalk,continueTalk,startCombat,startStealth,interact,tick,render,negotiate,shoot,save,restore,interactions,startActivity,activityPanel};loading.then(()=>{loadNode(params.get('node')||'PROLOGO');if(MAPS[params.get('map')])setupMap(params.get('map'));if(params.get('view')==='vn')startTalk(true)})}
