@@ -1,4 +1,4 @@
-@font-face{font-family:Pixel;src:url('assets/fonts/VT323-Regular.ttf') format('truetype');font-display:swap}
+@font-face{font-family:Pixel;src:url('assets/fonts/VT323-Regular.ttf?v=5.1.0') format('truetype');font-display:swap}
 body,button,kbd{font-family:Pixel,monospace;font-size:19px}button{border-radius:0;border:2px solid #59708080;box-shadow:inset 0 0 0 2px #08132260}button:hover{border-color:#dcbc82;translate:0 -1px}#hud{border-bottom:3px solid #8d78534f;box-shadow:0 4px 0 #050d18}#hud button{font-size:17px}.place strong{font:20px Pixel}.place small{font:14px Pixel;letter-spacing:.1em}.status{font:17px Pixel}.eyebrow{font:15px Pixel;letter-spacing:.12em}#walk-help{font:15px Pixel}kbd{font-size:14px}#toast{font:20px Pixel;border:2px solid #c0ad7c;border-radius:0}
 #visual-novel .art-background{image-rendering:pixelated}#visual-novel:not([hidden]) {
   display: grid;
